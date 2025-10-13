@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from ultralytics import YOLO
 import cv2
 import numpy as np
+import os
 
 app = FastAPI()
 model = YOLO("yolov8n.pt")  # downloads YOLO pretrained model
@@ -15,53 +16,47 @@ def get_dominant_color(roi):
     return (r, g, b)
 
 def generate_frames():
-    cap = cv2.VideoCapture(0)  # 0 = webcam
-    while True:
-        success, frame = cap.read()
-        if not success:
-            break
+    # If deployed on Render, skip webcam
+    if os.environ.get("RENDER", "false").lower() == "true":
+        print("⚠️ Webcam not available in Render environment.")
+        # You can later make this return a placeholder image or nothing
+        while True:
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(frame, "No Camera Available", (150, 240),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            _, buffer = cv2.imencode('.jpg', frame)
+            frame = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+    else:
+        cap = cv2.VideoCapture(0)
+        while True:
+            success, frame = cap.read()
+            if not success:
+                break
 
-        results = model(frame, verbose=False)
-        detections = results[0].boxes.data
+            results = model(frame, verbose=False)
+            detections = results[0].boxes.data
 
-        for box in detections:
-            x1, y1, x2, y2, conf, cls = box.tolist()
-            x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-            roi = frame[y1:y2, x1:x2]
+            for box in detections:
+                x1, y1, x2, y2, conf, cls = box.tolist()
+                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                roi = frame[y1:y2, x1:x2]
 
-            if roi.size != 0:
-                color = get_dominant_color(roi)
-                label = results[0].names[int(cls)]
-                hex_color = '#%02x%02x%02x' % color
+                if roi.size != 0:
+                    color = get_dominant_color(roi)
+                    label = results[0].names[int(cls)]
+                    hex_color = '#%02x%02x%02x' % color
 
-                # Draw bounding box
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    cv2.putText(frame, f"{label} {hex_color}", (x1, y1 - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-                # Label position
-                text_y = max(y1 - 10, 20)
+            _, buffer = cv2.imencode('.jpg', frame)
+            frame = buffer.tobytes()
 
-                # Draw label text
-                cv2.putText(frame, label, (x1, text_y),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-                # Draw color swatch rectangle beside label
-                color_box_x1 = x1 + 80
-                color_box_y1 = text_y - 15
-                color_box_x2 = color_box_x1 + 30
-                color_box_y2 = color_box_y1 + 20
-                cv2.rectangle(frame, (color_box_x1, color_box_y1),
-                              (color_box_x2, color_box_y2), color, -1)
-
-                # Draw hex color text beside swatch
-                cv2.putText(frame, hex_color, (color_box_x2 + 10, text_y),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
-        # Encode the frame for streaming
-        _, buffer = cv2.imencode('.jpg', frame)
-        frame = buffer.tobytes()
-
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 @app.get("/")
 def root():
