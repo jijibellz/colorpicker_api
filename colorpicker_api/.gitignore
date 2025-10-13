@@ -1,0 +1,20 @@
+# Ignore virtual environment
+venv/
+.venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment variables
+.env
+
+# VS Code settings (optional)
+.vscode/
+
+# macOS files (optional)
+.DS_Store
+
+# YOLO model files
+*.pt
