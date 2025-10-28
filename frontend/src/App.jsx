@@ -1,28 +1,41 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import styled from "styled-components";
 
 export default function App() {
-  // ✅ Change this to your deployed backend URL
-  const [videoUrl, setVideoUrl] = useState("https://colorpickernijiji.onrender.com/video");
-
-  // Optional fallback if backend is slow to load
+  const videoRef = useRef(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const img = new Image();
-    img.src = videoUrl;
-    img.onload = () => setIsLoaded(true);
-  }, [videoUrl]);
+    async function startCamera() {
+      try {
+        // Try local webcam first
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+          setIsLoaded(true);
+        }
+      } catch (err) {
+        console.error("Webcam not available, falling back to server stream", err);
+        // Fallback to your Render-deployed video URL
+        if (videoRef.current) {
+          videoRef.current.src = "https://colorpickernijiji.onrender.com/video";
+          videoRef.current.onloadeddata = () => setIsLoaded(true);
+          videoRef.current.play();
+        }
+      }
+    }
+
+    startCamera();
+  }, []);
 
   return (
     <PageContainer>
       <HeaderBar>🎨 Real-Time Color Detector</HeaderBar>
 
-      {!isLoaded ? (
-        <LoadingText>Connecting to camera...</LoadingText>
-      ) : (
-        <VideoFeed src={videoUrl} alt="Live Stream" />
-      )}
+      {!isLoaded && <LoadingText>Connecting to camera...</LoadingText>}
+
+      <VideoFeed ref={videoRef} autoPlay muted playsInline />
 
       <Footer>
         made with 💖 by <span>Jiji</span>
@@ -36,7 +49,7 @@ export default function App() {
 //
 const PageContainer = styled.div`
   position: relative;
-  height: 100dvh; /* ✅ better for mobile browsers with toolbars */
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
   background: black;
@@ -62,10 +75,10 @@ const HeaderBar = styled.div`
   z-index: 10;
 `;
 
-const VideoFeed = styled.img`
+const VideoFeed = styled.video`
   width: 100%;
   height: 100%;
-  object-fit: cover; /* ✅ fills screen while maintaining ratio */
+  object-fit: cover;
   background-color: black;
 `;
 
