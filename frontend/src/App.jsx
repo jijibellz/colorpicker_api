@@ -19,7 +19,7 @@ export default function App() {
         console.error("Webcam not available, falling back to server stream", err);
         // Fallback to your Render-deployed video URL
         if (videoRef.current) {
-          videoRef.current.src = "https://colorpickernijiji.onrender.com/video";
+          videoRef.current.src = "https://colorpickernijiji.onrender.com";
           videoRef.current.onloadeddata = () => setIsLoaded(true);
           videoRef.current.play();
         }
