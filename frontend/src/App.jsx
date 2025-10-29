@@ -5,8 +5,15 @@ export default function App() {
   const videoRef = useRef(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [facingMode, setFacingMode] = useState("user"); // 'user' = front, 'environment' = back
+  const [facingMode, setFacingMode] = useState("user");
 
+  // Dynamically choose backend URL based on environment
+  const backendUrl =
+    window.location.hostname === "localhost"
+      ? "http://127.0.0.1:8000/video"
+      : "https://colorpickernijiji.onrender.com/video";
+
+  // Detect mobile device
   useEffect(() => {
     const detectMobile = () => {
       const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
@@ -18,37 +25,40 @@ export default function App() {
     return () => window.removeEventListener("resize", detectMobile);
   }, []);
 
+  // Start camera or fallback to backend stream
   useEffect(() => {
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode },
         });
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
           setIsLoaded(true);
         }
       } catch (err) {
-        console.error("Webcam not available, falling back to server stream", err);
+        console.warn("⚠️ Local camera not available. Falling back to backend stream:", backendUrl);
         if (videoRef.current) {
-          videoRef.current.src = "https://colorpickernijiji.onrender.com";
+          videoRef.current.srcObject = null; // Ensure no old streams remain
+          videoRef.current.src = backendUrl;
           videoRef.current.onloadeddata = () => setIsLoaded(true);
-          videoRef.current.play();
+          videoRef.current.play().catch(() => {});
         }
       }
     }
 
     startCamera();
 
+    // Stop camera tracks when component unmounts
     return () => {
-      // Stop all video tracks when component unmounts
       if (videoRef.current?.srcObject) {
         const tracks = videoRef.current.srcObject.getTracks();
         tracks.forEach((track) => track.stop());
       }
     };
-  }, [facingMode]);
+  }, [facingMode, backendUrl]);
 
   const handleFlipCamera = () => {
     if (!isMobile) return;
@@ -68,7 +78,7 @@ export default function App() {
         disabled={!isMobile}
         title={isMobile ? "Flip Camera" : "Flip unavailable on desktop"}
       >
-        🔄 Flip
+        🔄
       </FlipButton>
 
       <Footer>
@@ -79,7 +89,7 @@ export default function App() {
 }
 
 //
-// 🌈 Styled Components
+// 🌸 Styled Components
 //
 const PageContainer = styled.div`
   position: relative;
@@ -132,7 +142,7 @@ const FlipButton = styled.button`
   border-radius: 50%;
   width: 60px;
   height: 60px;
-  font-size: 1.2rem;
+  font-size: 1.4rem;
   box-shadow: 0 0 15px rgba(236, 72, 153, 0.6);
   cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
   transition: 0.3s ease;

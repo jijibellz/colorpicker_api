@@ -14,7 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or ["http://localhost:5173"] if you want stricter
+    allow_origins=[
+        "http://localhost:5175",   # your React dev server
+        "https://colorpickernijiji.onrender.com",  # your deployed frontend
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
