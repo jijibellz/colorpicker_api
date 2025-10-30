@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 
 export default function App() {
-  const videoRef = useRef(null); // this will show the processed stream
+  const videoRef = useRef(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [facingMode, setFacingMode] = useState("user");
@@ -27,7 +27,11 @@ export default function App() {
     let pc;
 
     const startWebRTC = async () => {
-      pc = new RTCPeerConnection();
+      pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" }, // mandatory for deployed
+        ],
+      });
 
       // capture local webcam
       const localStream = await navigator.mediaDevices.getUserMedia({
@@ -35,19 +39,23 @@ export default function App() {
         audio: false,
       });
 
-      // add local tracks to WebRTC
+      // add local tracks to peer connection
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-      // when backend returns processed stream
+      // when backend returns processed track
       pc.ontrack = event => {
         if (videoRef.current) {
           videoRef.current.srcObject = event.streams[0];
-          videoRef.current.play();
+          videoRef.current.play().catch(() => {});
           setIsLoaded(true);
         }
       };
 
-      // create offer
+      pc.oniceconnectionstatechange = () => {
+        console.log("ICE connection state:", pc.iceConnectionState);
+      };
+
+      // create offer and send to backend
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
@@ -76,13 +84,10 @@ export default function App() {
   return (
     <PageContainer>
       <HeaderBar>🎨 Real-Time Color + Object Detector</HeaderBar>
-
       {!isLoaded && <LoadingText>Connecting to camera...</LoadingText>}
-
       <VideoBox>
-        <VideoFeed ref={videoRef} autoPlay playsInline />
+        <VideoFeed ref={videoRef} autoPlay playsInline muted />
       </VideoBox>
-
       <FlipButton
         onClick={handleFlipCamera}
         disabled={!isMobile}
@@ -90,14 +95,12 @@ export default function App() {
       >
         🔄
       </FlipButton>
-
       <Footer>
         made with 💖 by <span>Jiji</span>
       </Footer>
     </PageContainer>
   );
 }
-
 
 //
 // 🌸 Styled Components
