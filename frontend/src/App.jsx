@@ -41,12 +41,19 @@ export default function App() {
 
       // when backend returns processed track
       pc.ontrack = event => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = event.streams[0];
-          videoRef.current.play().catch(() => {});
-          setIsLoaded(true);
-        }
-      };
+  if (videoRef.current) {
+    const video = videoRef.current;
+    video.srcObject = event.streams[0];
+    video.muted = true;
+    video.autoplay = true;
+    video.playsInline = true;
+
+    video.play().catch(err => {
+      console.error("Video play error:", err);
+    });
+    setIsLoaded(true);
+  }
+};
 
       pc.oniceconnectionstatechange = () => {
         console.log("ICE connection state:", pc.iceConnectionState);
