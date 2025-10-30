@@ -1,26 +1,20 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 
 export default function App() {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
+  const videoRef = useRef(null); // this will show the processed stream
   const [isLoaded, setIsLoaded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [facingMode, setFacingMode] = useState("user");
-  const [useBackendStream, setUseBackendStream] = useState(false);
-  const [analysis, setAnalysis] = useState(null);
 
-  // ✅ Automatically choose backend
   const backendBaseUrl =
     window.location.hostname.includes("localhost")
       ? "http://127.0.0.1:8000"
       : "https://colorpickernijiji.onrender.com";
 
-  // ✅ Detect if device is mobile
   useEffect(() => {
     const detectMobile = () => {
-      const isTouchDevice =
-        "ontouchstart" in window || navigator.maxTouchPoints > 0;
+      const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
       const isSmallScreen = window.innerWidth < 900;
       setIsMobile(isTouchDevice && isSmallScreen);
     };
@@ -29,80 +23,54 @@ export default function App() {
     return () => window.removeEventListener("resize", detectMobile);
   }, []);
 
-  // ✅ Try to access local camera
   useEffect(() => {
-    async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode },
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-          setIsLoaded(true);
-          setUseBackendStream(false);
-        }
-      } catch (err) {
-        console.warn("⚠️ Local camera not available, fallback:", err);
-        setUseBackendStream(true);
-        setIsLoaded(true);
-      }
-    }
+    let pc;
 
-    startCamera();
+    const startWebRTC = async () => {
+      pc = new RTCPeerConnection();
+
+      // capture local webcam
+      const localStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode },
+        audio: false,
+      });
+
+      // add local tracks to WebRTC
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+      // when backend returns processed stream
+      pc.ontrack = event => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = event.streams[0];
+          videoRef.current.play();
+          setIsLoaded(true);
+        }
+      };
+
+      // create offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const res = await fetch(`${backendBaseUrl}/offer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sdp: offer.sdp, type: offer.type }),
+      });
+
+      const answer = await res.json();
+      await pc.setRemoteDescription(answer);
+    };
+
+    startWebRTC();
 
     return () => {
-      if (videoRef.current?.srcObject) {
-        const tracks = videoRef.current.srcObject.getTracks();
-        tracks.forEach((track) => track.stop());
-      }
+      pc?.close();
     };
   }, [facingMode]);
 
-  // ✅ Capture a frame and send to backend every second
-  useEffect(() => {
-    if (useBackendStream) return; // no local camera, skip
-
-    const interval = setInterval(async () => {
-      if (!videoRef.current || !canvasRef.current) return;
-
-      const canvas = canvasRef.current;
-      const context = canvas.getContext("2d");
-      const video = videoRef.current;
-
-      // Draw current frame to canvas
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      // Convert to blob and send to backend
-      canvas.toBlob(async (blob) => {
-        if (!blob) return;
-
-        const formData = new FormData();
-        formData.append("file", blob, "frame.jpg");
-
-        try {
-          const res = await fetch(`${backendBaseUrl}/analyze`, {
-            method: "POST",
-            body: formData,
-          });
-
-          const data = await res.json();
-          setAnalysis(data);
-        } catch (error) {
-          console.error("❌ Error sending frame:", error);
-        }
-      }, "image/jpeg");
-    }, 1500); // every 1.5 seconds
-
-    return () => clearInterval(interval);
-  }, [useBackendStream, backendBaseUrl]);
-
-  // ✅ Flip camera (mobile only)
   const handleFlipCamera = () => {
     if (!isMobile) return;
-    setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
+    setFacingMode(prev => (prev === "user" ? "environment" : "user"));
   };
 
   return (
@@ -111,17 +79,9 @@ export default function App() {
 
       {!isLoaded && <LoadingText>Connecting to camera...</LoadingText>}
 
-      {useBackendStream ? (
-        <FallbackBox>
-          <p>🚫 Local camera unavailable</p>
-          <p>Try using your device camera instead!</p>
-        </FallbackBox>
-      ) : (
-        <>
-          <VideoFeed ref={videoRef} autoPlay muted playsInline />
-          <HiddenCanvas ref={canvasRef} />
-        </>
-      )}
+      <VideoBox>
+        <VideoFeed ref={videoRef} autoPlay playsInline />
+      </VideoBox>
 
       <FlipButton
         onClick={handleFlipCamera}
@@ -131,44 +91,13 @@ export default function App() {
         🔄
       </FlipButton>
 
-      {/* 🎨 Results display */}
-      {analysis && (
-        <ResultsPanel>
-          <h3>🎨 Scene Colors</h3>
-          <ColorRow>
-            {analysis.scene_colors?.map((c, idx) => (
-              <ColorBox key={idx} color={c.hex}>
-                <span>{c.name}</span>
-                <small>{c.hex}</small>
-              </ColorBox>
-            ))}
-          </ColorRow>
-
-          <h3>🧠 Detected Objects</h3>
-          <ObjectList>
-            {analysis.objects?.length > 0 ? (
-              analysis.objects.map((obj, idx) => (
-                <ObjectItem key={idx}>
-                  <ColorDot color={obj.main_color.hex} />
-                  <span>
-                    {obj.object} ({obj.main_color.name}){" "}
-                    <small>{obj.confidence}</small>
-                  </span>
-                </ObjectItem>
-              ))
-            ) : (
-              <p>No objects detected 🫠</p>
-            )}
-          </ObjectList>
-        </ResultsPanel>
-      )}
-
       <Footer>
         made with 💖 by <span>Jiji</span>
       </Footer>
     </PageContainer>
   );
 }
+
 
 //
 // 🌸 Styled Components
@@ -177,7 +106,7 @@ const PageContainer = styled.div`
   position: relative;
   height: 100dvh;
   width: 100vw;
-  background: black;
+  background: #0b0b0b;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -201,20 +130,59 @@ const HeaderBar = styled.div`
   z-index: 10;
 `;
 
-const VideoFeed = styled.video`
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+const VideoBox = styled.div`
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid #ff8ac6;
+  box-shadow: 0 0 10px rgba(255, 105, 180, 0.5);
 `;
 
-const HiddenCanvas = styled.canvas`
-  display: none;
+const VideoFeed = styled.video`
+  width: 640px;
+  height: 480px;
+  border-radius: 12px;
+`;
+
+const Canvas = styled.canvas`
+  position: absolute;
+  top: 0;
+  left: 0;
 `;
 
 const LoadingText = styled.div`
   color: #f9a8d4;
   font-size: 1.1rem;
   text-shadow: 0 0 8px rgba(255, 182, 193, 0.6);
+`;
+
+const ResultsPanel = styled.div`
+  margin-top: 1rem;
+  color: white;
+  text-align: center;
+  max-width: 90%;
+  h3 {
+    color: #ff8ac6;
+    margin-bottom: 0.4rem;
+  }
+`;
+
+const ColorPalette = styled.div`
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 0.5rem;
+`;
+
+const ColorBox = styled.div`
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid #fff3;
+  cursor: pointer;
 `;
 
 const FlipButton = styled.button`
@@ -236,71 +204,6 @@ const FlipButton = styled.button`
   &:hover {
     transform: ${(props) => (props.disabled ? "none" : "scale(1.1)")};
   }
-`;
-
-const ResultsPanel = styled.div`
-  position: absolute;
-  bottom: 1rem;
-  left: 1rem;
-  right: 1rem;
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(8px);
-  border-radius: 1rem;
-  padding: 1rem;
-  color: white;
-  text-align: center;
-  z-index: 15;
-  h3 {
-    color: #ffb6c1;
-    margin: 0.3rem 0;
-  }
-`;
-
-const ColorRow = styled.div`
-  display: flex;
-  justify-content: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.5rem;
-`;
-
-const ColorBox = styled.div`
-  background-color: ${(props) => props.color};
-  padding: 0.4rem 0.8rem;
-  border-radius: 8px;
-  color: black;
-  font-weight: 600;
-  text-shadow: 0 0 3px white;
-  small {
-    display: block;
-    font-size: 0.75rem;
-  }
-`;
-
-const ObjectList = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-`;
-
-const ObjectItem = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 0.2rem 0;
-`;
-
-const ColorDot = styled.div`
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background-color: ${(props) => props.color};
-  border: 1px solid #fff;
-`;
-
-const FallbackBox = styled.div`
-  color: #fca5a5;
-  text-align: center;
 `;
 
 const Footer = styled.footer`
