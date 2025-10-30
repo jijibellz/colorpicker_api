@@ -4,7 +4,7 @@ import numpy as np
 import asyncio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from ultralytics import YOLO
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from aiortc.contrib.media import MediaBlackhole
@@ -16,7 +16,11 @@ app = FastAPI(title="🎨 YOLO + Color Picker (WebRTC Edition)")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5175", "https://colorpickerjiji.onrender.com", "https://colorpickernijiji.onrender.com"],
+    allow_origins=[
+        "http://localhost:5175",
+        "https://colorpickerjiji.onrender.com",
+        "https://colorpickernijiji.onrender.com",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -38,10 +42,10 @@ def rgb_to_name(rgb_tuple):
         min_colors = {}
         for name, hex_code in webcolors.HTML4_NAMES_TO_HEX.items():
             r_c, g_c, b_c = webcolors.hex_to_rgb(hex_code)
-            rd = int(r_c - rgb_tuple[0]) ** 2
-            gd = int(g_c - rgb_tuple[1]) ** 2
-            bd = int(b_c - rgb_tuple[2]) ** 2
-            min_colors[(rd + gd + bd)] = name
+            rd = (r_c - rgb_tuple[0]) ** 2
+            gd = (g_c - rgb_tuple[1]) ** 2
+            bd = (b_c - rgb_tuple[2]) ** 2
+            min_colors[rd + gd + bd] = name
         return min_colors[min(min_colors.keys())]
 
 def get_top_colors(roi, n_colors=3):
@@ -50,7 +54,6 @@ def get_top_colors(roi, n_colors=3):
             return [(255, 255, 255)] * n_colors
         roi_resized = cv2.resize(roi, (100, 100))
         pixels = roi_resized.reshape((-1, 3))
-        # Use simple frequency count
         unique, counts = np.unique(pixels, axis=0, return_counts=True)
         sorted_indices = np.argsort(-counts)
         colors = []
@@ -81,8 +84,6 @@ def draw_color_palette(frame, colors, start_x, start_y):
 
 # === Video Processor ===
 class VideoProcessor(VideoStreamTrack):
-    """Processes video frames with YOLO + color detection."""
-
     def __init__(self, track, skip_frames=2):
         super().__init__()
         self.track = track
@@ -111,7 +112,6 @@ class VideoProcessor(VideoStreamTrack):
                 results = model(img, verbose=False)
                 self.last_results = results[0].boxes.data
 
-            # Draw last results
             if self.last_results is not None:
                 for box in self.last_results:
                     x1, y1, x2, y2, conf, cls = box.tolist()
@@ -138,6 +138,7 @@ pcs = set()
 
 @app.post("/offer")
 async def offer(request: Request):
+    """Handle WebRTC POST offers."""
     params = await request.json()
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
     pc = RTCPeerConnection()
@@ -166,6 +167,11 @@ async def offer(request: Request):
     return JSONResponse(
         {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
     )
+
+@app.get("/offer")
+def offer_get():
+    """Return a friendly message if someone does GET /offer"""
+    return PlainTextResponse("🚀 Please POST a WebRTC offer to this endpoint.")
 
 @app.get("/")
 def home():
