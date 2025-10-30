@@ -3,20 +3,24 @@ import styled from "styled-components";
 
 export default function App() {
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [facingMode, setFacingMode] = useState("user");
+  const [useBackendStream, setUseBackendStream] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
 
-  // Dynamically choose backend URL based on environment
-  const backendUrl =
-    window.location.hostname === "localhost"
-      ? "http://127.0.0.1:8000/video"
-      : "https://colorpickernijiji.onrender.com/video";
+  // ✅ Automatically choose backend
+  const backendBaseUrl =
+    window.location.hostname.includes("localhost")
+      ? "http://127.0.0.1:8000"
+      : "https://colorpickernijiji.onrender.com";
 
-  // Detect mobile device
+  // ✅ Detect if device is mobile
   useEffect(() => {
     const detectMobile = () => {
-      const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+      const isTouchDevice =
+        "ontouchstart" in window || navigator.maxTouchPoints > 0;
       const isSmallScreen = window.innerWidth < 900;
       setIsMobile(isTouchDevice && isSmallScreen);
     };
@@ -25,41 +29,77 @@ export default function App() {
     return () => window.removeEventListener("resize", detectMobile);
   }, []);
 
-  // Start camera or fallback to backend stream
+  // ✅ Try to access local camera
   useEffect(() => {
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode },
         });
-
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
           setIsLoaded(true);
+          setUseBackendStream(false);
         }
       } catch (err) {
-        console.warn("⚠️ Local camera not available. Falling back to backend stream:", backendUrl);
-        if (videoRef.current) {
-          videoRef.current.srcObject = null; // Ensure no old streams remain
-          videoRef.current.src = backendUrl;
-          videoRef.current.onloadeddata = () => setIsLoaded(true);
-          videoRef.current.play().catch(() => {});
-        }
+        console.warn("⚠️ Local camera not available, fallback:", err);
+        setUseBackendStream(true);
+        setIsLoaded(true);
       }
     }
 
     startCamera();
 
-    // Stop camera tracks when component unmounts
     return () => {
       if (videoRef.current?.srcObject) {
         const tracks = videoRef.current.srcObject.getTracks();
         tracks.forEach((track) => track.stop());
       }
     };
-  }, [facingMode, backendUrl]);
+  }, [facingMode]);
 
+  // ✅ Capture a frame and send to backend every second
+  useEffect(() => {
+    if (useBackendStream) return; // no local camera, skip
+
+    const interval = setInterval(async () => {
+      if (!videoRef.current || !canvasRef.current) return;
+
+      const canvas = canvasRef.current;
+      const context = canvas.getContext("2d");
+      const video = videoRef.current;
+
+      // Draw current frame to canvas
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Convert to blob and send to backend
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+
+        const formData = new FormData();
+        formData.append("file", blob, "frame.jpg");
+
+        try {
+          const res = await fetch(`${backendBaseUrl}/analyze`, {
+            method: "POST",
+            body: formData,
+          });
+
+          const data = await res.json();
+          setAnalysis(data);
+        } catch (error) {
+          console.error("❌ Error sending frame:", error);
+        }
+      }, "image/jpeg");
+    }, 1500); // every 1.5 seconds
+
+    return () => clearInterval(interval);
+  }, [useBackendStream, backendBaseUrl]);
+
+  // ✅ Flip camera (mobile only)
   const handleFlipCamera = () => {
     if (!isMobile) return;
     setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
@@ -67,11 +107,21 @@ export default function App() {
 
   return (
     <PageContainer>
-      <HeaderBar>🎨 Real-Time Color Detector</HeaderBar>
+      <HeaderBar>🎨 Real-Time Color + Object Detector</HeaderBar>
 
       {!isLoaded && <LoadingText>Connecting to camera...</LoadingText>}
 
-      <VideoFeed ref={videoRef} autoPlay muted playsInline />
+      {useBackendStream ? (
+        <FallbackBox>
+          <p>🚫 Local camera unavailable</p>
+          <p>Try using your device camera instead!</p>
+        </FallbackBox>
+      ) : (
+        <>
+          <VideoFeed ref={videoRef} autoPlay muted playsInline />
+          <HiddenCanvas ref={canvasRef} />
+        </>
+      )}
 
       <FlipButton
         onClick={handleFlipCamera}
@@ -80,6 +130,38 @@ export default function App() {
       >
         🔄
       </FlipButton>
+
+      {/* 🎨 Results display */}
+      {analysis && (
+        <ResultsPanel>
+          <h3>🎨 Scene Colors</h3>
+          <ColorRow>
+            {analysis.scene_colors?.map((c, idx) => (
+              <ColorBox key={idx} color={c.hex}>
+                <span>{c.name}</span>
+                <small>{c.hex}</small>
+              </ColorBox>
+            ))}
+          </ColorRow>
+
+          <h3>🧠 Detected Objects</h3>
+          <ObjectList>
+            {analysis.objects?.length > 0 ? (
+              analysis.objects.map((obj, idx) => (
+                <ObjectItem key={idx}>
+                  <ColorDot color={obj.main_color.hex} />
+                  <span>
+                    {obj.object} ({obj.main_color.name}){" "}
+                    <small>{obj.confidence}</small>
+                  </span>
+                </ObjectItem>
+              ))
+            ) : (
+              <p>No objects detected 🫠</p>
+            )}
+          </ObjectList>
+        </ResultsPanel>
+      )}
 
       <Footer>
         made with 💖 by <span>Jiji</span>
@@ -95,13 +177,13 @@ const PageContainer = styled.div`
   position: relative;
   height: 100dvh;
   width: 100vw;
-  overflow: hidden;
   background: black;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
   font-family: "Poppins", sans-serif;
+  overflow: hidden;
 `;
 
 const HeaderBar = styled.div`
@@ -123,7 +205,10 @@ const VideoFeed = styled.video`
   width: 100%;
   height: 100%;
   object-fit: cover;
-  background-color: black;
+`;
+
+const HiddenCanvas = styled.canvas`
+  display: none;
 `;
 
 const LoadingText = styled.div`
@@ -153,9 +238,74 @@ const FlipButton = styled.button`
   }
 `;
 
-const Footer = styled.footer`
+const ResultsPanel = styled.div`
   position: absolute;
   bottom: 1rem;
+  left: 1rem;
+  right: 1rem;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  border-radius: 1rem;
+  padding: 1rem;
+  color: white;
+  text-align: center;
+  z-index: 15;
+  h3 {
+    color: #ffb6c1;
+    margin: 0.3rem 0;
+  }
+`;
+
+const ColorRow = styled.div`
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+`;
+
+const ColorBox = styled.div`
+  background-color: ${(props) => props.color};
+  padding: 0.4rem 0.8rem;
+  border-radius: 8px;
+  color: black;
+  font-weight: 600;
+  text-shadow: 0 0 3px white;
+  small {
+    display: block;
+    font-size: 0.75rem;
+  }
+`;
+
+const ObjectList = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+`;
+
+const ObjectItem = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.2rem 0;
+`;
+
+const ColorDot = styled.div`
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: ${(props) => props.color};
+  border: 1px solid #fff;
+`;
+
+const FallbackBox = styled.div`
+  color: #fca5a5;
+  text-align: center;
+`;
+
+const Footer = styled.footer`
+  position: absolute;
+  bottom: 0.4rem;
   width: 100%;
   text-align: center;
   color: #f9a8d4;
