@@ -1,4 +1,9 @@
-# main.py
+# === main.py ===
+import logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger("webrtc")
+logger.setLevel(logging.DEBUG)
+
 import cv2
 import numpy as np
 import asyncio
@@ -145,6 +150,10 @@ async def offer(request: Request):
     pcs.add(pc)
     print("📡 New WebRTC connection")
 
+    @pc.on("iceconnectionstatechange")
+    async def on_ice_state_change():
+        print("❄️ ICE connection state:", pc.iceConnectionState)
+
     @pc.on("connectionstatechange")
     async def on_connectionstatechange():
         print("🔄 Connection state:", pc.connectionState)
@@ -164,6 +173,7 @@ async def offer(request: Request):
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
 
+    print("📨 SDP answer created successfully")
     return JSONResponse(
         {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
     )
