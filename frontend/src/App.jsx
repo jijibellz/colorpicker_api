@@ -25,10 +25,16 @@ export default function App() {
 
     const startWebRTC = async () => {
       pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" }, // mandatory for deployed
-        ],
-      });
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    {
+      urls: "turn:global.relay.metered.ca:80",
+      username: "openai",
+      credential: "openai123",
+    },
+  ],
+});
+
 
       // capture local webcam
       const localStream = await navigator.mediaDevices.getUserMedia({
