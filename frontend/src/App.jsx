@@ -7,10 +7,7 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(false);
   const [facingMode, setFacingMode] = useState("user");
 
-  const backendBaseUrl =
-    window.location.hostname.includes("localhost")
-      ? "http://127.0.0.1:8000"
-      : "https://colorpickernijiji.onrender.com";
+  const backendBaseUrl = import.meta.env.VITE_API_URL;
 
   useEffect(() => {
     const detectMobile = () => {
