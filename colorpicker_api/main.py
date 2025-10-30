@@ -16,7 +16,7 @@ app = FastAPI(title="🎨 YOLO + Color Picker (WebRTC Edition)")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5175", "https://colorpickerjiji.onrender.com"],
+    allow_origins=["http://localhost:5175", "https://colorpickerjiji.onrender.com", "https://colorpickernijiji.onrender.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
